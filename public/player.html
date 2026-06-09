@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Stream Player</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d0d0d;
+      color: #e0e0e0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #111;
+      border-bottom: 1px solid #222;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    .dot-live { width: 10px; height: 10px; border-radius: 50%; background: #e53935; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+    .layout { display: grid; grid-template-columns: 1fr 280px; gap: 0; height: calc(100vh - 53px); }
+
+    .main { display: flex; flex-direction: column; background: #000; }
+
+    .video-container { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; position: relative; }
+    video { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+    .video-overlay {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.7); flex-direction: column; gap: 12px;
+    }
+    .video-overlay.hidden { display: none; }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid #333;
+      border-top-color: #e53935; border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .overlay-text { font-size: 0.9rem; color: #888; }
+
+    .player-bar {
+      background: #111;
+      border-top: 1px solid #1e1e1e;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .player-bar input {
+      flex: 1; min-width: 160px;
+      padding: 8px 12px;
+      background: #1a1a1a; border: 1px solid #2e2e2e;
+      border-radius: 4px; color: #e0e0e0; font-size: 14px;
+      outline: none;
+    }
+    .player-bar input:focus { border-color: #e53935; }
+    .btn {
+      padding: 8px 16px; border: none; border-radius: 4px;
+      cursor: pointer; font-size: 14px; font-weight: 500; transition: background 0.15s;
+    }
+    .btn-primary { background: #e53935; color: #fff; }
+    .btn-primary:hover { background: #c62828; }
+    .btn-secondary { background: #222; color: #bbb; }
+    .btn-secondary:hover { background: #2e2e2e; }
+
+    .status-pill {
+      padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 600;
+    }
+    .pill-live { background: #1b3a1b; color: #4caf50; border: 1px solid #4caf50; }
+    .pill-loading { background: #1a1e3a; color: #5c8ee0; border: 1px solid #5c8ee0; }
+    .pill-offline { background: #2a1a1a; color: #888; border: 1px solid #333; }
+    .pill-error { background: #3a1a1a; color: #f44336; border: 1px solid #f44336; }
+
+    .quality-select {
+      padding: 6px 10px; background: #1a1a1a; border: 1px solid #2e2e2e;
+      border-radius: 4px; color: #ccc; font-size: 13px; cursor: pointer;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      background: #111;
+      border-left: 1px solid #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .sidebar-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid #1e1e1e;
+      font-size: 13px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .stream-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .stream-card {
+      background: #181818;
+      border: 1px solid #222;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .stream-card:hover { background: #1f1f1f; border-color: #e53935; }
+    .stream-card.active-card { border-color: #e53935; background: #1f1a1a; }
+    .stream-card-key { font-size: 14px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .stream-card-meta { font-size: 12px; color: #555; }
+    .no-streams { padding: 24px 16px; text-align: center; color: #444; font-size: 13px; }
+
+    @media (max-width: 768px) {
+      .layout { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="dot-live" id="headerDot" style="background:#555"></div>
+    <h1>Live Stream</h1>
+  </header>
+
+  <div class="layout">
+    <div class="main">
+      <div class="video-container">
+        <video id="video" controls playsinline></video>
+        <div class="video-overlay" id="overlay">
+          <div class="spinner" id="spinner"></div>
+          <div class="overlay-text" id="overlayText">Enter a stream key below</div>
+        </div>
+      </div>
+
+      <div class="player-bar">
+        <input type="text" id="streamKeyInput" placeholder="Stream key (e.g. mystream)" />
+        <button class="btn btn-primary" onclick="watchStream()">Watch</button>
+        <button class="btn btn-secondary" onclick="stopPlayer()">Stop</button>
+        <span class="status-pill pill-offline" id="statusPill">Offline</span>
+        <select class="quality-select" id="qualitySelect" onchange="setQuality(this.value)" style="display:none">
+          <option value="-1">Auto</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sidebar-header">Active Streams</div>
+      <div class="stream-list" id="streamList">
+        <div class="no-streams">No active streams</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let hls = null;
+    let currentStreamKey = null;
+    let pollTimer = null;
+
+    const video = document.getElementById('video');
+    const overlay = document.getElementById('overlay');
+    const spinner = document.getElementById('spinner');
+    const overlayText = document.getElementById('overlayText');
+    const statusPill = document.getElementById('statusPill');
+    const qualitySelect = document.getElementById('qualitySelect');
+    const headerDot = document.getElementById('headerDot');
+
+    function setStatus(text, type) {
+      statusPill.textContent = text;
+      statusPill.className = `status-pill pill-${type}`;
+      headerDot.style.background = { live: '#4caf50', loading: '#5c8ee0', offline: '#555', error: '#f44336' }[type] || '#555';
+    }
+
+    function showOverlay(text, showSpinner = true) {
+      overlay.classList.remove('hidden');
+      overlayText.textContent = text;
+      spinner.style.display = showSpinner ? 'block' : 'none';
+    }
+
+    function hideOverlay() {
+      overlay.classList.add('hidden');
+    }
+
+    function destroyHls() {
+      if (hls) { hls.destroy(); hls = null; }
+      clearTimeout(pollTimer);
+    }
+
+    function stopPlayer() {
+      destroyHls();
+      video.src = '';
+      currentStreamKey = null;
+      setStatus('Offline', 'offline');
+      showOverlay('Enter a stream key below', false);
+      qualitySelect.style.display = 'none';
+      renderStreamList(lastStreamData);
+    }
+
+    function watchStream(key) {
+      const streamKey = key || document.getElementById('streamKeyInput').value.trim();
+      if (!streamKey) return;
+
+      document.getElementById('streamKeyInput').value = streamKey;
+      currentStreamKey = streamKey;
+
+      destroyHls();
+      showOverlay('Connecting...', true);
+      setStatus('Connecting', 'loading');
+
+      loadHls(streamKey);
+      renderStreamList(lastStreamData);
+    }
+
+    function loadHls(streamKey, retries = 0) {
+      const src = `/streams/${streamKey}/master.m3u8`;
+
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          liveDurationInfinity: true,
+          liveBackBufferLength: 30,
+          maxBufferLength: 20,
+          maxMaxBufferLength: 30,
+          lowLatencyMode: false
+        });
+
+        hls.loadSource(src);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (e, data) => {
+          setStatus('Live', 'live');
+          hideOverlay();
+
+          // Populate quality selector
+          qualitySelect.innerHTML = '<option value="-1">Auto</option>';
+          hls.levels.forEach((level, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = `${level.height}p`;
+            qualitySelect.appendChild(opt);
+          });
+          qualitySelect.style.display = 'block';
+
+          video.play().catch(() => {});
+        });
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, (e, data) => {
+          const lev = hls.levels[data.level];
+          if (lev) qualitySelect.title = `${lev.height}p @ ${Math.round(lev.bitrate / 1000)}kbps`;
+        });
+
+        hls.on(Hls.Events.ERROR, (e, data) => {
+          if (!data.fatal) return;
+
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            const delay = Math.min(3000 * (retries + 1), 15000);
+            setStatus('Reconnecting', 'loading');
+            showOverlay(`Stream not ready — retrying in ${delay / 1000}s`, true);
+            hls.destroy();
+            hls = null;
+
+            pollTimer = setTimeout(() => {
+              if (currentStreamKey === streamKey) loadHls(streamKey, retries + 1);
+            }, delay);
+          } else {
+            setStatus('Error', 'error');
+            showOverlay('Playback error — check stream key', false);
+          }
+        });
+
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        video.src = src;
+        video.addEventListener('loadedmetadata', () => {
+          hideOverlay();
+          setStatus('Live', 'live');
+          video.play();
+        }, { once: true });
+      } else {
+        showOverlay('HLS not supported in this browser', false);
+        setStatus('Unsupported', 'error');
+      }
+    }
+
+    function setQuality(val) {
+      if (!hls) return;
+      hls.currentLevel = parseInt(val, 10);
+      hls.autoLevelEnabled = val === '-1';
+    }
+
+    // Sidebar stream list
+    let lastStreamData = {};
+
+    async function fetchStreams() {
+      try {
+        const res = await fetch('/api/streams');
+        lastStreamData = await res.json();
+        renderStreamList(lastStreamData);
+      } catch {
+        // Network error — don't clobber UI
+      }
+    }
+
+    function renderStreamList(data) {
+      const list = document.getElementById('streamList');
+      const keys = Object.keys(data || {});
+
+      if (!keys.length) {
+        list.innerHTML = '<div class="no-streams">No active streams</div>';
+        return;
+      }
+
+      list.innerHTML = keys.map(key => `
+        <div class="stream-card ${currentStreamKey === key ? 'active-card' : ''}" onclick="watchStream('${key}')">
+          <div class="stream-card-key">${key}</div>
+          <div class="stream-card-meta">Uptime: ${formatUptime(data[key].uptime)}</div>
+        </div>
+      `).join('');
+    }
+
+    function formatUptime(s) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const ss = s % 60;
+      return [h, m, ss].map(v => String(v).padStart(2, '0')).join(':');
+    }
+
+    // Auto-load from ?stream= URL param
+    const params = new URLSearchParams(location.search);
+    const autoKey = params.get('stream');
+    if (autoKey) watchStream(autoKey);
+    else showOverlay('Enter a stream key below', false);
+
+    fetchStreams();
+    setInterval(fetchStreams, 5000);
+
+    // Allow Enter key in input
+    document.getElementById('streamKeyInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') watchStream();
+    });
+  </script>
+</body>
+</html>
