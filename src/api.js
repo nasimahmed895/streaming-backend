@@ -2,26 +2,24 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const { startStream, stopStream, isStreamActive, getActiveStreams } = require('./ffmpeg');
+const { requireAdmin, getAllowedDomains } = require('./auth');
 const logger = require('./logger');
 
 const router = express.Router();
 
-// POST /api/start/:streamKey  — manually trigger FFmpeg (bypass RTMP event)
+// POST /api/start/:streamKey
 router.post('/start/:streamKey', (req, res) => {
   const { streamKey } = req.params;
 
   if (!/^[a-zA-Z0-9_-]+$/.test(streamKey)) {
     return res.status(400).json({ error: 'Invalid stream key. Alphanumeric, _ and - only.' });
   }
-
   if (isStreamActive(streamKey)) {
     return res.status(409).json({ error: 'Stream already active', streamKey });
   }
 
   const started = startStream(streamKey);
-  if (!started) {
-    return res.status(500).json({ error: 'Failed to start FFmpeg process' });
-  }
+  if (!started) return res.status(500).json({ error: 'Failed to start FFmpeg process' });
 
   logger.info(`API: manually started stream ${streamKey}`);
   res.json({
@@ -36,15 +34,11 @@ router.post('/start/:streamKey', (req, res) => {
 router.post('/stop/:streamKey', (req, res) => {
   const { streamKey } = req.params;
   const stopped = stopStream(streamKey);
-
-  if (!stopped) {
-    return res.status(404).json({ error: 'Stream not found or not active' });
-  }
-
+  if (!stopped) return res.status(404).json({ error: 'Stream not found or not active' });
   res.json({ success: true, streamKey });
 });
 
-// GET /api/stream/:streamKey  — stream status + URLs
+// GET /api/stream/:streamKey
 router.get('/stream/:streamKey', (req, res) => {
   const { streamKey } = req.params;
   const active = isStreamActive(streamKey);
@@ -60,16 +54,14 @@ router.get('/stream/:streamKey', (req, res) => {
   });
 
   res.json({
-    streamKey,
-    active,
-    hlsReady,
+    streamKey, active, hlsReady,
     hlsUrl: hlsReady ? `/streams/${streamKey}/master.m3u8` : null,
     playerUrl: `/player?stream=${streamKey}`,
     qualities
   });
 });
 
-// GET /api/streams  — all active streams
+// GET /api/streams
 router.get('/streams', (req, res) => {
   res.json(getActiveStreams());
 });
@@ -79,8 +71,14 @@ router.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    activeStreams: Object.keys(getActiveStreams()).length
+    activeStreams: Object.keys(getActiveStreams()).length,
+    allowedDomains: getAllowedDomains()
   });
+});
+
+// GET /api/domains — view whitelisted domains (admin only)
+router.get('/domains', requireAdmin, (req, res) => {
+  res.json({ allowedDomains: getAllowedDomains() });
 });
 
 module.exports = router;

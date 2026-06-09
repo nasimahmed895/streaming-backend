@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "kill": "lsof -ti :3434 -ti :1935 | xargs kill -9 2>/dev/null || true",
+    "restart": "npm run kill && sleep 1 && node src/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -5,13 +5,18 @@ const cors = require('cors');
 const { createRTMPServer } = require('./rtmp');
 const apiRoutes = require('./api');
 const { startCleanupJob } = require('./ffmpeg');
+const { streamAuthMiddleware } = require('./auth');
 const logger = require('./logger');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-app.use(cors());
+// CORS open for API — /streams CORS is handled per-token in streamAuthMiddleware
+app.use('/api', cors());
 app.use(express.json());
+
+// Domain-lock: every /streams/* request must carry a valid token + correct Referer
+app.use('/streams', streamAuthMiddleware);
 
 // Serve HLS segments with correct MIME types + no-cache on playlists
 app.use('/streams', express.static(path.join(__dirname, '..', 'streams'), {
