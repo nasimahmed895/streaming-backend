@@ -2,6 +2,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const logger = require('./logger');
+const { generateEncryptionKey, createKeyInfoFile, removeKey } = require('./encryption');
 
 const STREAMS_DIR = path.join(__dirname, '..', 'streams');
 const CLEANUP_MINUTES = parseInt(process.env.CLEANUP_AFTER_MINUTES || '30', 10);
@@ -13,7 +14,7 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function buildFFmpegArgs(inputUrl, outputDir) {
+function buildFFmpegArgs(inputUrl, outputDir, keyInfoPath) {
   return [
     '-i', inputUrl,
 
@@ -52,7 +53,7 @@ function buildFFmpegArgs(inputUrl, outputDir) {
     '-g:v:2', '48', '-keyint_min:v:2', '48', '-sc_threshold:v:2', '0',
     '-c:a:2', 'aac', '-b:a:2', '96k', '-ar:a:2', '48000', '-ac:a:2', '2',
 
-    // HLS output
+    // HLS output with AES-128 encryption
     '-var_stream_map', 'v:0,a:0,name:1080p v:1,a:1,name:720p v:2,a:2,name:480p',
     '-master_pl_name', 'master.m3u8',
     '-f', 'hls',
@@ -60,6 +61,7 @@ function buildFFmpegArgs(inputUrl, outputDir) {
     '-hls_list_size', '10',
     '-hls_flags', 'delete_segments+append_list+independent_segments',
     '-hls_segment_type', 'mpegts',
+    '-hls_key_info_file', keyInfoPath,
     '-hls_segment_filename', `${outputDir}/%v/segment%05d.ts`,
     `${outputDir}/%v/index.m3u8`
   ];
@@ -75,8 +77,13 @@ function startStream(streamKey) {
   ensureDir(outputDir);
   ['1080p', '720p', '480p'].forEach(q => ensureDir(path.join(outputDir, q)));
 
+  // Generate AES-128 key — key URI points to our /key/:streamKey endpoint
+  const serverUrl = process.env.SERVER_URL || `http://localhost:${process.env.PORT || 3434}`;
+  generateEncryptionKey(streamKey);
+  const keyInfoPath = createKeyInfoFile(streamKey, `${serverUrl}/key/${streamKey}`);
+
   const rtmpUrl = `rtmp://127.0.0.1:1935/live/${streamKey}`;
-  const args = buildFFmpegArgs(rtmpUrl, outputDir);
+  const args = buildFFmpegArgs(rtmpUrl, outputDir, keyInfoPath);
 
   logger.info(`FFmpeg starting for stream: ${streamKey}`);
 
@@ -125,6 +132,7 @@ function stopStream(streamKey) {
   }, 5000);
 
   activeStreams.delete(streamKey);
+  removeKey(streamKey);
   logger.info(`Stream stopped: ${streamKey}`);
   return true;
 }

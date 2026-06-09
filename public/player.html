@@ -205,7 +205,7 @@
       renderStreamList(lastStreamData);
     }
 
-    function watchStream(key) {
+    async function watchStream(key) {
       const streamKey = key || document.getElementById('streamKeyInput').value.trim();
       if (!streamKey) return;
 
@@ -216,13 +216,25 @@
       showOverlay('Connecting...', true);
       setStatus('Connecting', 'loading');
 
-      loadHls(streamKey);
+      // Get IP-bound session token from server
+      try {
+        const res = await fetch(`/session/${streamKey}`, { method: 'POST' });
+        if (!res.ok) {
+          setStatus('Error', 'error');
+          showOverlay('Access denied', false);
+          return;
+        }
+        const { hlsUrl } = await res.json();
+        loadHls(streamKey, hlsUrl, 0);
+      } catch {
+        setStatus('Error', 'error');
+        showOverlay('Server unreachable', false);
+      }
+
       renderStreamList(lastStreamData);
     }
 
-    function loadHls(streamKey, retries = 0) {
-      const src = `/streams/${streamKey}/master.m3u8`;
-
+    function loadHls(streamKey, src, retries = 0) {
       if (Hls.isSupported()) {
         hls = new Hls({
           enableWorker: true,
@@ -268,8 +280,15 @@
             hls.destroy();
             hls = null;
 
-            pollTimer = setTimeout(() => {
-              if (currentStreamKey === streamKey) loadHls(streamKey, retries + 1);
+            pollTimer = setTimeout(async () => {
+              if (currentStreamKey !== streamKey) return;
+              // Re-fetch session on retry (old session may have expired)
+              try {
+                const res = await fetch(`/session/${streamKey}`, { method: 'POST' });
+                if (!res.ok) return;
+                const { hlsUrl } = await res.json();
+                loadHls(streamKey, hlsUrl, retries + 1);
+              } catch {}
             }, delay);
           } else {
             setStatus('Error', 'error');
@@ -278,7 +297,6 @@
         });
 
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        // Safari native HLS
         video.src = src;
         video.addEventListener('loadedmetadata', () => {
           hideOverlay();
