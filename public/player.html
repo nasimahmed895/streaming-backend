@@ -164,6 +164,7 @@
   <script>
     let hls = null;
     let currentStreamKey = null;
+    let currentToken = null;
     let pollTimer = null;
 
     const video = document.getElementById('video');
@@ -221,7 +222,7 @@
     }
 
     function loadHls(streamKey, retries = 0) {
-      const src = `/streams/${streamKey}/master.m3u8`;
+      const src = `/streams/${streamKey}/master.m3u8${currentToken ? '?token=' + currentToken : ''}`;
 
       if (Hls.isSupported()) {
         hls = new Hls({
@@ -230,7 +231,13 @@
           liveBackBufferLength: 30,
           maxBufferLength: 20,
           maxMaxBufferLength: 30,
-          lowLatencyMode: false
+          lowLatencyMode: false,
+          // Append token to every segment/playlist request
+          xhrSetup: (xhr, url) => {
+            if (currentToken && !url.includes('token=')) {
+              xhr.open('GET', url + (url.includes('?') ? '&' : '?') + 'token=' + currentToken, true);
+            }
+          }
         });
 
         hls.loadSource(src);
@@ -334,9 +341,10 @@
       return [h, m, ss].map(v => String(v).padStart(2, '0')).join(':');
     }
 
-    // Auto-load from ?stream= URL param
+    // Auto-load from ?stream=&token= URL params
     const params = new URLSearchParams(location.search);
     const autoKey = params.get('stream');
+    currentToken = params.get('token') || null;
     if (autoKey) watchStream(autoKey);
     else showOverlay('Enter a stream key below', false);
 
